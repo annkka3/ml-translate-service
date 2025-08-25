@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Вход</h2>
+<form method="post" action="/web/login" class="card">
+  <label>Email <input type="email" name="email" required></label>
+  <label>Пароль <input type="password" name="password" required></label>
+  <button type="submit">Войти</button>
+  <p>Нет аккаунта? <a href="/web/register">Регистрация</a></p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+</form>
+{% endblock %}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>{% block title %}ML Translate{% endblock %}</title>
+
+  <!-- Единый шрифт Inter -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <!-- Общий стиль (с версионированием для сброса кеша) -->
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ static_version|default('1') }}"/>
+
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="/web/dashboard">ML Translate</a>
+      <nav class="nav">
+        <a href="/web/dashboard" class="nav-link">Кабинет</a>
+        <a href="/web/transactions" class="nav-link">Операции</a>
+        <a href="/docs" class="nav-link" target="_blank" rel="noopener">API Docs</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <span>© {{ (now or '') or '' }} ML Translate</span>
+      <span class="muted">Учебный проект</span>
+    </div>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

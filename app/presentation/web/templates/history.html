@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}История переводов — ML Translate{% endblock %}
+{% block content %}
+<h1>История переводов</h1>
+<div class="card">
+  {% if items and items|length %}
+    <table class="table">
+      <thead><tr><th>#</th><th>Время</th><th>Исходный</th><th>Результат</th><th>Стоимость</th></tr></thead>
+      <tbody>
+      {% for x in items %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ x.timestamp }}</td>
+          <td>{{ x.input_text }}</td>
+          <td>{{ x.output_text }}</td>
+          <td>{{ x.cost }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">Пока пусто.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,178 @@
+
+services:
+  database:
+    image: postgres:15
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ml_db
+      DEBUG: "True"
+      INIT_DB_ON_START: "True"
+      INIT_DB_DROP_ALL: "False"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ml-network
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+      RABBITMQ_DEFAULT_VHOST: /
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - ml-network
+
+  app:
+    build:
+      context: ./app
+    image: ml-api:1.0
+    container_name: ml-api
+    restart: unless-stopped
+    env_file: "./app/.env"
+    environment:
+      HF_HOME: /opt/hf-cache
+      TRANSFORMERS_CACHE: /opt/hf-cache
+      API_BASE: "http://127.0.0.1:8080"
+      DB_HOST: database
+      DB_PORT: "5432"
+      DB_USER: user
+      DB_PASS: password
+      DB_NAME: ml_db
+
+      DEBUG: "True"
+      INIT_DB_ON_START: "False"
+      INIT_DB_DROP_ALL: "False"
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: user
+      RABBITMQ_PASSWORD: password
+      RABBITMQ_VHOST: /
+      TASK_QUEUE: ml_tasks
+
+      PYTHONPATH: /workspace
+    depends_on:
+      database:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./app:/workspace/app
+      - hf-cache:/opt/hf-cache
+    working_dir: /workspace
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8080
+    networks:
+      - ml-network
+
+  worker:
+    image: ml-api:1.0
+    restart: unless-stopped
+    env_file: "./app/.env"
+    environment:
+      PYTHONPATH: /workspace
+
+      # --- DB  ---
+      DB_HOST: database
+      DB_PORT: "5432"
+      DB_USER: user
+      DB_PASS: password
+      DB_NAME: ml_db
+
+      # --- RabbitMQ ---
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: user
+      RABBITMQ_PASSWORD: password
+      RABBITMQ_VHOST: /
+      TASK_QUEUE: ml_tasks
+
+      HF_HOME: /opt/hf-cache
+      TRANSFORMERS_CACHE: /opt/hf-cache
+
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+    volumes:
+      - ./app:/workspace/app
+      - hf-cache:/opt/hf-cache
+    working_dir: /workspace
+    networks:
+      - ml-network
+    command: >
+      python -m app.infrastructure.worker.worker
+
+  telegram-bot:
+    build:
+      context: ./app/presentation/telegram
+    container_name: telegram-bot
+    restart: unless-stopped
+    env_file: "./app/presentation/telegram/.env"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - ml-network
+#     volumes:
+#       - ./app/presentation/telegram:/bot
+#     working_dir: /bot
+    command: >
+      python bot.py
+
+  nginx:
+    image: nginx:1.25
+    container_name: ml-nginx
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - ml-network
+
+networks:
+  ml-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  hf-cache:

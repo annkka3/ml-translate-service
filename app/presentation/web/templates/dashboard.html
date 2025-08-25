@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Кабинет — ML Translate{% endblock %}
+
+{% block content %}
+<h1>Кабинет</h1>
+
+<section class="grid-2">
+  <div class="card">
+    <h3>Баланс</h3>
+    <p class="big">{{ balance }}</p>
+    <form method="post" action="/web/topup" class="row">
+      <input type="number" step="1" min="1" name="amount" placeholder="Сумма пополнения" required>
+      <button type="submit">Пополнить</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Перевод</h3>
+    <form method="post" action="/web/translate">
+      <label>Текст
+        <textarea name="text" rows="5" required></textarea>
+      </label>
+      <label>Язык назначения
+        <input name="target_lang" value="en" />
+      </label>
+      <button type="submit">Перевести</button>
+    </form>
+    {% if result %}
+      <div class="result">
+        <h4>Результат</h4>
+        <pre>{{ result }}</pre>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card" style="margin-top:18px">
+  <h3>История</h3>
+  {% if history and history|length %}
+    <table class="table">
+      <thead><tr><th>ID</th><th>Дата</th><th>Текст</th><th>Результат</th></tr></thead>
+      <tbody>
+      {% for item in history %}
+        <tr>
+          <td>{{ item.id or loop.index }}</td>
+          <td>{{ item.created_at or item.timestamp or "" }}</td>
+          <td>{{ item.text or item.source_text or "" }}</td>
+          <td>{{ item.translated_text or item.result or "" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">Пока пусто.</p>
+  {% endif %}
+</section>
+
+<section class="card" style="margin-top:18px">
+  <h3>История операций</h3>
+  {% if txns and txns|length > 0 %}
+    <table class="table small">
+      <thead><tr><th>#</th><th>Время</th><th>Тип</th><th>Сумма</th></tr></thead>
+      <tbody>
+      {% for t in txns[:10] %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ t.timestamp or t.created_at }}</td>
+          <td>
+            {% set ttype = (t.type or '') | lower %}
+            {% if ttype in ['topup', 'пополнение'] %}<span class="badge success">Пополнение</span>
+            {% elif ttype in ['debit', 'списание'] %}<span class="badge warn">Списание</span>
+            {% else %}{{ t.type }}{% endif %}
+          </td>
+          <td>{{ t.amount }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p style="margin-top:10px"><a class="btn" href="/web/transactions">Смотреть все →</a></p>
+  {% else %}
+    <p class="muted">Нет операций.</p>
+  {% endif %}
+</section>
+
+{% if error %}<p class="badge danger" style="margin-top:12px">{{ error }}</p>{% endif %}
+{% endblock %}
