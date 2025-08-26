@@ -1,43 +1,44 @@
+# app/core/settings.py
+from __future__ import annotations
+
+import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import TypeAlias
 
-class Settings(BaseSettings):
-    # === App ===
-    APP_NAME: str = "ML_API"
-    DEBUG: bool = False
-    INIT_DB_ON_START: bool = False
-    INIT_DB_DROP_ALL: bool = False  # опционально: жёсткая инициализация в dev
+from app.infrastructure.db.config import (
+    get_settings as _base_get_settings,
+    Settings as _BaseSettings,
+)
 
-    # === Auth ===
-    SECRET_KEY: str = "change-me"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+# публичный тип — такой же, как базовый
+Settings: TypeAlias = _BaseSettings
 
-    # === DB ===
-    DB_HOST: str = "database"
-    DB_PORT: int = 5432
-    DB_USER: str = "user"
-    DB_PASS: str = "password"
-    DB_NAME: str = "ml_db"
-    DATABASE_URL_asyncpg: str | None = None
+def _build_amqp_url() -> str:
+    # собираем из окружения (совместимо с docker-compose)
+    user = os.getenv("RABBITMQ_USER", "user")
+    pwd = os.getenv("RABBITMQ_PASSWORD", "password")
+    host = os.getenv("RABBITMQ_HOST", "rabbitmq")
+    port = os.getenv("RABBITMQ_PORT", "5672")
+    return os.getenv("AMQP_URL", f"amqp://{user}:{pwd}@{host}:{port}/")
 
-    # === RabbitMQ / Worker ===
-    AMQP_URL: str = "amqp://user:pass@rabbitmq:5672/"
-    TASK_QUEUE: str = "ml_tasks"
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Возвращает единый объект настроек из infrastructure/db/config.py
+    + добавляет недостающие поля (AMQP_URL, TASK_QUEUE) и алиасы для обратной совместимости.
+    """
+    s = _base_get_settings()
 
-    model_config = SettingsConfigDict(
-        env_prefix="",
-        case_sensitive=False,
-        env_file=".env",
-    )
+    # --- AMQP / очередь (если их нет в базовых настройках)
+    if not hasattr(s, "AMQP_URL") or not getattr(s, "AMQP_URL"):
+        setattr(s, "AMQP_URL", _build_amqp_url())
+    if not hasattr(s, "TASK_QUEUE") or not getattr(s, "TASK_QUEUE"):
+        setattr(s, "TASK_QUEUE", os.getenv("TASK_QUEUE", "ml_tasks"))
 
-    def model_post_init(self, __context) -> None:
-        if not self.DATABASE_URL_asyncpg:
-            self.DATABASE_URL_asyncpg = (
-                f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASS}"
-                f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-            )
+    # --- совместимость: если кто-то ждёт DATABASE_URL_asyncpg
+    if not getattr(s, "DATABASE_URL_asyncpg", None):
+        # если базовые настройки уже собрали DATABASE_URL — используем его
+        if getattr(s, "DATABASE_URL", None):
+            setattr(s, "DATABASE_URL_asyncpg", s.DATABASE_URL)
 
-@lru_cache
-def get_settings() -> "Settings":
-    return Settings()
+    return s

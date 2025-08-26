@@ -52,15 +52,9 @@ def decode_access_token(
     algs = algorithms or [DEFAULT_ALG]
     try:
         return jwt.decode(token, sk, algorithms=algs)
-    except ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    except ExpiredSignatureError as e:
+        # Преобразуем в базовый JWTError — вызывающий код уже его ждёт
+        raise JWTError("Token expired") from e
+    except JWTError as e:
+        # Пробрасываем как есть (не FastAPI HTTPException)
+        raise

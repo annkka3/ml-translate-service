@@ -1,20 +1,19 @@
-
 from typing import Annotated, Optional
-
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.domain.schemas.auth import TokenOut
 from app.infrastructure.db.database import get_db
 from app.infrastructure.db.config import get_settings
 from app.infrastructure.db.models.user import User
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, create_access_token
 
 settings = get_settings()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+oauth2_optional = OAuth2PasswordBearer(tokenUrl="auth/token", auto_error=False)
 
 async def _get_user_by_id(user_id: str, db: AsyncSession) -> Optional[User]:
     res = await db.execute(select(User).where(User.id == user_id))
@@ -49,7 +48,7 @@ async def get_current_admin(
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return current_user
 
-oauth2_optional = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+oauth2_optional = OAuth2PasswordBearer(tokenUrl="auth/token", auto_error=False)
 
 async def get_optional_user(
     token: Annotated[Optional[str], Depends(oauth2_optional)],
@@ -65,4 +64,3 @@ async def get_optional_user(
     except JWTError:
         return None
     return await _get_user_by_id(user_id, db)
-

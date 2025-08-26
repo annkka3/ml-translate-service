@@ -1,11 +1,25 @@
+<!-- app/presentation/web/templates/register.html -->
 {% extends "base.html" %}
+{% block title %}Регистрация — ML Translate{% endblock %}
+
 {% block content %}
-<h2>Регистрация</h2>
-<form method="post" action="/web/register" class="card">
-  <label>Email <input type="email" name="email" required></label>
-  <label>Пароль <input type="password" name="password" required></label>
-  <button type="submit">Создать аккаунт</button>
-  <p>Уже есть аккаунт? <a href="/web/login">Войти</a></p>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+<h1>Регистрация</h1>
+<form method="post" action="/web/register" class="card" style="max-width:520px" novalidate>
+  <label>Email
+    <input type="email" name="email" inputmode="email" required
+           autocomplete="username" placeholder="you@example.com" autofocus>
+  </label>
+  <label>Пароль
+    <input type="password" name="password" required minlength="8"
+           autocomplete="new-password" placeholder="минимум 8 символов">
+  </label>
+  <!-- необязательно: подтверждение пароля
+  <label>Повторите пароль
+    <input type="password" name="password2" autocomplete="new-password">
+  </label>
+  -->
+  <button type="submit" style="margin-top:10px">Создать аккаунт</button>
+  <p style="margin-top:8px">Уже есть аккаунт? <a href="/web/login">Войти</a></p>
+  {% if error %}<p class="error" style="margin-top:8px">{{ error }}</p>{% endif %}
 </form>
 {% endblock %}

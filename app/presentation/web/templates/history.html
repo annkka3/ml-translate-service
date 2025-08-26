@@ -1,25 +1,48 @@
+<!-- app/presentation/web/templates/history.html -->
 {% extends "base.html" %}
 {% block title %}История переводов — ML Translate{% endblock %}
+
 {% block content %}
 <h1>История переводов</h1>
+
 <div class="card">
   {% if items and items|length %}
-    <table class="table">
-      <thead><tr><th>#</th><th>Время</th><th>Исходный</th><th>Результат</th><th>Стоимость</th></tr></thead>
-      <tbody>
-      {% for x in items %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ x.timestamp }}</td>
-          <td>{{ x.input_text }}</td>
-          <td>{{ x.output_text }}</td>
-          <td>{{ x.cost }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table small">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Время</th>
+            <th>Языки</th>
+            <th>Исходный</th>
+            <th>Результат</th>
+            <th>Стоимость</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for x in items %}
+          <tr>
+            <td>{{ loop.index + ((page-1) * limit) if page and limit else loop.index }}</td>
+            <td>{{ x.timestamp }}</td>
+            <td>{{ x.source_lang }} → {{ x.target_lang }}</td>
+            <td>{{ x.input_text }}</td>
+            <td>{{ x.output_text }}</td>
+            <td>{{ x.cost if x.cost is not none else "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- простая пагинация -->
+    <div class="row" style="margin-top:10px">
+      {% if prev_page %}<a class="btn btn-secondary" href="?page={{ prev_page }}&limit={{ limit }}">← Назад</a>{% endif %}
+      <span class="muted">Страница {{ page }}</span>
+      {% if next_page %}<a class="btn" href="?page={{ next_page }}&limit={{ limit }}">Вперёд →</a>{% endif %}
+    </div>
   {% else %}
     <p class="muted">Пока пусто.</p>
   {% endif %}
 </div>
 {% endblock %}
+

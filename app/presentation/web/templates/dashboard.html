@@ -7,8 +7,8 @@
 <section class="grid-2">
   <div class="card">
     <h3>Баланс</h3>
-    <p class="big">{{ balance }}</p>
-    <form method="post" action="/web/topup" class="row">
+    <p class="big">{{ balance or 0 }}</p>
+    <form method="post" action="/web/topup" class="row" style="margin-top:10px">
       <input type="number" step="1" min="1" name="amount" placeholder="Сумма пополнения" required>
       <button type="submit">Пополнить</button>
     </form>
@@ -17,39 +17,51 @@
   <div class="card">
     <h3>Перевод</h3>
     <form method="post" action="/web/translate">
-      <label>Текст
-        <textarea name="text" rows="5" required></textarea>
+      <label>Исходный текст
+        <textarea name="text" rows="5" required placeholder="Hello world"></textarea>
       </label>
-      <label>Язык назначения
-        <input name="target_lang" value="en" />
-      </label>
-      <button type="submit">Перевести</button>
+      <div class="grid-2" style="margin-top:8px">
+        <label>Исх. язык (source)
+          <input name="source_lang" value="en" required />
+        </label>
+        <label>Язык назначения (target)
+          <input name="target_lang" value="fr" required />
+        </label>
+      </div>
+      <button type="submit" style="margin-top:10px">Перевести</button>
     </form>
+
     {% if result %}
       <div class="result">
         <h4>Результат</h4>
         <pre>{{ result }}</pre>
       </div>
     {% endif %}
+    {% if error %}
+      <p class="error" style="margin-top:8px">{{ error }}</p>
+    {% endif %}
   </div>
 </section>
 
 <section class="card" style="margin-top:18px">
-  <h3>История</h3>
+  <h3>История переводов</h3>
   {% if history and history|length %}
-    <table class="table">
-      <thead><tr><th>ID</th><th>Дата</th><th>Текст</th><th>Результат</th></tr></thead>
-      <tbody>
-      {% for item in history %}
-        <tr>
-          <td>{{ item.id or loop.index }}</td>
-          <td>{{ item.created_at or item.timestamp or "" }}</td>
-          <td>{{ item.text or item.source_text or "" }}</td>
-          <td>{{ item.translated_text or item.result or "" }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table small">
+        <thead><tr><th>ID</th><th>Дата</th><th>Исходный текст</th><th>Перевод</th><th>Списано</th></tr></thead>
+        <tbody>
+        {% for item in history %}
+          <tr>
+            <td>{{ item.id }}</td>
+            <td>{{ item.timestamp }}</td>
+            <td>{{ item.input_text }}</td>
+            <td>{{ item.output_text }}</td>
+            <td>{{ item.cost if item.cost is not none else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
   {% else %}
     <p class="muted">Пока пусто.</p>
   {% endif %}
@@ -57,30 +69,30 @@
 
 <section class="card" style="margin-top:18px">
   <h3>История операций</h3>
-  {% if txns and txns|length > 0 %}
-    <table class="table small">
-      <thead><tr><th>#</th><th>Время</th><th>Тип</th><th>Сумма</th></tr></thead>
-      <tbody>
-      {% for t in txns[:10] %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ t.timestamp or t.created_at }}</td>
-          <td>
-            {% set ttype = (t.type or '') | lower %}
-            {% if ttype in ['topup', 'пополнение'] %}<span class="badge success">Пополнение</span>
-            {% elif ttype in ['debit', 'списание'] %}<span class="badge warn">Списание</span>
-            {% else %}{{ t.type }}{% endif %}
-          </td>
-          <td>{{ t.amount }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  {% if txns and txns|length %}
+    <div class="table-wrap">
+      <table class="table small">
+        <thead><tr><th>#</th><th>Время</th><th>Тип</th><th>Сумма</th></tr></thead>
+        <tbody>
+        {% for t in txns[:10] %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ t.timestamp }}</td>
+            <td>
+              {% set ttype = (t.type|string)|lower %}
+              {% if 'пополнение' in ttype %}<span class="badge success">Пополнение</span>
+              {% elif 'списание' in ttype %}<span class="badge warn">Списание</span>
+              {% else %}{{ t.type }}{% endif %}
+            </td>
+            <td>{{ t.amount }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <p style="margin-top:10px"><a class="btn" href="/web/transactions">Смотреть все →</a></p>
   {% else %}
     <p class="muted">Нет операций.</p>
   {% endif %}
 </section>
-
-{% if error %}<p class="badge danger" style="margin-top:12px">{{ error }}</p>{% endif %}
 {% endblock %}

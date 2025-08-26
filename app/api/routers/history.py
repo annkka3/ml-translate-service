@@ -1,5 +1,7 @@
-#app/api/routers/history.py
-from fastapi import APIRouter, Depends
+# app/api/routers/history.py
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +15,29 @@ from app.domain.schemas.classes import TranslationItem, TransactionItem
 router = APIRouter(prefix="/history", tags=["history"])
 
 
-@router.get("/translations", response_model=list[TranslationItem])
+# -------------------- helpers --------------------
+
+
+def _validate_pagination(skip: int, limit: int) -> None:
+    """
+    Базовая валидация пагинации:
+      - skip >= 0
+      - 1 <= limit <= 500 (чтобы не уронить БД случайным запросом)
+    """
+    if skip < 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="skip must be >= 0")
+    if limit <= 0 or limit > 500:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="limit must be in [1, 500]")
+
+
+# -------------------- endpoints --------------------
+
+
+@router.get(
+    "/translations",
+    response_model=list[TranslationItem],
+    response_model_exclude_none=True,
+)
 async def list_translations(
     skip: int = 0,
     limit: int = 100,
@@ -24,6 +48,8 @@ async def list_translations(
     История переводов текущего пользователя.
     По умолчанию — последние 100 записей.
     """
+    _validate_pagination(skip, limit)
+
     stmt = (
         select(Translation)
         .where(Translation.user_id == current_user.id)
@@ -36,7 +62,11 @@ async def list_translations(
     return items
 
 
-@router.get("/transactions", response_model=list[TransactionItem])
+@router.get(
+    "/transactions",
+    response_model=list[TransactionItem],
+    response_model_exclude_none=True,
+)
 async def list_transactions(
     skip: int = 0,
     limit: int = 100,
@@ -47,6 +77,8 @@ async def list_transactions(
     История транзакций кошелька текущего пользователя.
     По умолчанию — последние 100 записей.
     """
+    _validate_pagination(skip, limit)
+
     stmt = (
         select(Transaction)
         .where(Transaction.user_id == current_user.id)

@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, ClassVar, Any
 from datetime import datetime
@@ -6,29 +5,25 @@ import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlalchemy.sql import Select
 
-from app.infrastructure.db.models.transaction import Transaction
+from app.infrastructure.db.models.transaction import Transaction, TransactionType
 from app.infrastructure.db.models.translation import Translation
 from app.infrastructure.db.models.user import User
 from app.infrastructure.db.models.wallet import Wallet
 
 
-
+# ────────────────────────────────────────────────────────────────────────────────
 @dataclass
 class TextValidationResult:
     is_valid: bool
     errors: List[str]
+
 
 @dataclass
 class Model:
     SUPPORTED_MODELS: ClassVar[Dict[Tuple[str, str], str]] = {
         ("en", "fr"): "Helsinki-NLP/opus-mt-en-fr",
         ("fr", "en"): "Helsinki-NLP/opus-mt-fr-en",
-
-        # ("ru", "en"): "Helsinki-NLP/opus-mt-ru-en",
-        # ("en", "ru"): "Helsinki-NLP/opus-mt-en-ru",
     }
     _pipes: ClassVar[Dict[Tuple[str, str], Any]] = {}
 
@@ -64,71 +59,62 @@ class TranslationRequest:
         return (v or "").strip().lower()
 
     async def process(self, db: AsyncSession) -> str:
-
+        """
+        ВНИМАНИЕ: транзакцию НЕ открываем здесь.
+        Ожидаем, что вызывающая функция уже находится внутри `async with db.begin():`.
+        """
         self.source_lang = self._normalize_lang(self.source_lang)
         self.target_lang = self._normalize_lang(self.target_lang)
         self.input_text = (self.input_text or "").strip()
         if not self.input_text:
             raise ValueError("input_text is empty")
 
-        async with db.begin():
-
-            has_external_id = hasattr(Translation, "external_id")
-
-            if self.external_id and has_external_id:
-                existing = await db.execute(
-                    select(Translation).where(Translation.external_id == self.external_id)
-                )
-                existed = existing.scalar_one_or_none()
-                if existed:
-                    return existed.output_text
-
-            wallet_q: Select = (
-                select(Wallet)
-                .where(Wallet.user_id == self.user_id)
-                .with_for_update()
-            )
-            res = await db.execute(wallet_q)
-            locked_wallet: Optional[Wallet] = res.scalar_one_or_none()
-
-            if locked_wallet is None:
-                raise ValueError("Wallet not found")
-
-            if locked_wallet.balance is None or locked_wallet.balance < self.cost:
-                raise ValueError("Недостаточно средств на балансе")
-
-            output_text = self.model.translate(
-                origin_text=self.input_text,
-                source_lang=self.source_lang,
-                target_lang=self.target_lang,
-            )
-
-            locked_wallet.balance -= self.cost
+        # блокируем кошелёк
+        res = await db.execute(
+            select(Wallet).where(Wallet.user_id == self.user_id).with_for_update()
+        )
+        locked_wallet: Optional[Wallet] = res.scalar_one_or_none()
+        if locked_wallet is None:
+            # создаём кошелёк при первом обращении
+            locked_wallet = Wallet(user_id=self.user_id, balance=0)
             db.add(locked_wallet)
+            await db.flush()
 
-            ext_id = self.external_id or str(uuid.uuid4())
-            tr_kwargs = dict(
-                user_id=self.user_id,
-                input_text=self.input_text,
-                output_text=output_text,
-                source_lang=self.source_lang,
-                target_lang=self.target_lang,
-                cost=self.cost,
-            )
-            if has_external_id:
-                tr_kwargs["external_id"] = ext_id
+        if locked_wallet.balance is None or locked_wallet.balance < self.cost:
+            raise ValueError("Недостаточно средств на балансе")
 
-            translation = Translation(**tr_kwargs)
-            db.add(translation)
+        # выполняем перевод (ML)
+        output_text = self.model.translate(
+            origin_text=self.input_text,
+            source_lang=self.source_lang,
+            target_lang=self.target_lang,
+        )
 
-            tx = Transaction(
-                id=str(uuid.uuid4()),
-                timestamp=datetime.now(),
+        # списываем и пишем историю
+        locked_wallet.balance -= self.cost
+        db.add(locked_wallet)
+
+        tr_kwargs = dict(
+            user_id=self.user_id,
+            input_text=self.input_text,
+            output_text=output_text,
+            source_lang=self.source_lang,
+            target_lang=self.target_lang,
+            cost=self.cost,
+        )
+        if hasattr(Translation, "external_id"):
+            tr_kwargs["external_id"] = self.external_id or str(uuid.uuid4())
+
+        translation = Translation(**tr_kwargs)
+        db.add(translation)
+
+        db.add(
+            Transaction(
                 user_id=self.user_id,
                 amount=self.cost,
-                type="Списание",
+                type=TransactionType.DEBIT,
             )
-            db.add(tx)
+        )
 
         return output_text
 
@@ -142,39 +128,65 @@ async def process_translation_request(
     external_id: Optional[str] = None,
 ) -> dict:
     """
-    Точка входа для API:
-      1) грузит пользователя и кошелёк
-      2) выполняет перевод (идемпотентно по external_id, если поддерживается)
-      3) возвращает текст и стоимость
+    Единая точка входа (используется и вебом, и воркером).
+    Здесь ОДНА транзакция на весь сценарий:
+      - загрузка пользователя/кошелька
+      - проверка идемпотентности по external_id (если есть столбец)
+      - валидация, перевод, списание, запись Translation + Transaction
     """
-    # 1) пользователь + кошелёк
-    result = await db.execute(
-        select(User)
-        .options(selectinload(User.wallet))
-        .where(User.id == user_id)
-    )
-    user: Optional[User] = result.scalar_one_or_none()
-    if not user:
-        raise ValueError("User not found")
+    # Достаём поля из data (поддержка dict и объектов с атрибутами)
+    if isinstance(data, dict):
+        input_text = data.get("input_text", "")
+        source_lang = data.get("source_lang", "")
+        target_lang = data.get("target_lang", "")
+    else:
+        input_text = getattr(data, "input_text", "")
+        source_lang = getattr(data, "source_lang", "")
+        target_lang = getattr(data, "target_lang", "")
 
-    # 2) собираем запрос (стоимость фиксированная = 1)
-    req = TranslationRequest(
-        user_id=user.id,
-        wallet=user.wallet,
-        input_text=data.input_text,
-        source_lang=data.source_lang,
-        target_lang=data.target_lang,
-        model=Model(),
-        external_id=external_id,
-        cost=1,
-    )
+    model = Model()
+    cost = 1
 
-    output_text = await req.process(db)
+    async with db.begin():
+        # идемпотентность по external_id (если колонка есть)
+        if external_id and hasattr(Translation, "external_id"):
+            existed_q = await db.execute(
+                select(Translation).where(Translation.external_id == external_id)
+            )
+            existed = existed_q.scalar_one_or_none()
+            if existed:
+                return {
+                    "output_text": existed.output_text,
+                    "cost": existed.cost,
+                    "timestamp": datetime.now().isoformat(),
+                    "external_id": external_id,
+                }
 
-    # 3) ответ
+        # пользователь (нужен для проверки существования, кошелёк получим отдельно)
+        res_user = await db.execute(select(User).where(User.id == user_id))
+        user: Optional[User] = res_user.scalar_one_or_none()
+        if not user:
+            raise ValueError("User not found")
+
+        # собираем запрос
+        req = TranslationRequest(
+            user_id=user.id,
+            wallet=user.wallet if hasattr(user, "wallet") else None,  # не критично
+            input_text=input_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            model=model,
+            external_id=external_id,
+            cost=cost,
+        )
+
+        # выполняем (внутри — блокировка кошелька, списание и запись)
+        output_text = await req.process(db)
+
+    # здесь транзакция уже зафиксирована
     return {
         "output_text": output_text,
-        "cost": req.cost,
+        "cost": cost,
         "timestamp": datetime.now().isoformat(),
         "external_id": external_id,
     }

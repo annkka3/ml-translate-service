@@ -1,28 +1,41 @@
+<!-- app/presentation/web/templates/base.html -->
 <!doctype html>
-<html lang="ru">
+<html lang="ru" class="{% block body_class %}{% endblock %}">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>{% block title %}ML Translate{% endblock %}</title>
 
-  <!-- Единый шрифт Inter -->
+  <!-- Inter -->
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
-  <!-- Общий стиль (с версионированием для сброса кеша) -->
-  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ static_version|default('1') }}"/>
+  <!-- Общий стиль (важно: используем request.url_for) -->
+  <link rel="stylesheet"
+        href="{{ request.url_for('static', path='styles.css') }}?v={{ static_version|default('1') }}"/>
 
   {% block head_extra %}{% endblock %}
 </head>
 <body>
+  {% set current_path = request.url.path %}
   <header class="site-header">
     <div class="container">
-      <a class="brand" href="/web/dashboard">ML Translate</a>
+      <a class="brand" href="{{ url_for('dashboard') }}">ML Translate</a>
       <nav class="nav">
-        <a href="/web/dashboard" class="nav-link">Кабинет</a>
-        <a href="/web/transactions" class="nav-link">Операции</a>
+        <a href="{{ url_for('dashboard') }}"
+           class="nav-link{% if current_path.startswith('/web/dashboard') %} active{% endif %}"
+           aria-current="{% if current_path.startswith('/web/dashboard') %}page{% else %}false{% endif %}">
+          Кабинет
+        </a>
+        <a href="/web/transactions"
+           class="nav-link{% if current_path.startswith('/web/transactions') %} active{% endif %}">
+          Операции
+        </a>
         <a href="/docs" class="nav-link" target="_blank" rel="noopener">API Docs</a>
+        <button id="themeToggle" class="btn-ghost" type="button" title="Тема">
+          🌓
+        </button>
       </nav>
     </div>
   </header>
@@ -33,11 +46,50 @@
 
   <footer class="site-footer">
     <div class="container">
-      <span>© {{ (now or '') or '' }} ML Translate</span>
+      <span>© {{ now or '' }} ML Translate</span>
       <span class="muted">Учебный проект</span>
     </div>
   </footer>
 
-  {% block scripts %}{% endblock %}
+  <!-- Тосты -->
+  <div id="toast" class="toast" hidden></div>
+
+  {% block scripts %}
+  <script>
+    // Тема: system / light / dark (localStorage.theme)
+    (function () {
+      const html = document.documentElement;
+      const key = 'ml-theme';
+      const saved = localStorage.getItem(key);
+
+      function apply(theme) {
+        if (theme === 'dark') html.classList.add('theme-dark');
+        else html.classList.remove('theme-dark');
+      }
+      // начальное состояние
+      if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        apply('dark');
+      }
+
+      const btn = document.getElementById('themeToggle');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          const isDark = html.classList.toggle('theme-dark');
+          localStorage.setItem(key, isDark ? 'dark' : 'light');
+        });
+      }
+
+      // простой API для тостов: showToast('Текст', 'success'|'warn'|'danger')
+      window.showToast = function (text, kind) {
+        const el = document.getElementById('toast');
+        if (!el) return;
+        el.className = 'toast' + (kind ? ' ' + kind : '');
+        el.textContent = text;
+        el.hidden = false;
+        setTimeout(() => { el.hidden = true; }, 3000);
+      };
+    })();
+  </script>
+  {% endblock %}
 </body>
 </html>

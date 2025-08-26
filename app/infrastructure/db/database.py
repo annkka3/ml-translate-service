@@ -1,9 +1,11 @@
 # app/infrastructure/db/database.py
 from __future__ import annotations
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -15,30 +17,34 @@ from app.infrastructure.db.config import get_settings
 settings = get_settings()
 
 
-# --- SQLAlchemy Base ---
+# --- Base with naming convention (удобно для Alembic) -----------------
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+
 class Base(DeclarativeBase):
-    """Общий declarative Base для всех моделей."""
-    pass
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
+# --- URL resolver ------------------------------------------------------
 def _resolve_database_url() -> str:
     """
-    Универсальное определение URL подключения:
-    1) settings.DATABASE_URL (новый вариант, универсальный)
-    2) settings.DATABASE_URL_asyncpg (старый вариант)
-    3) сборка из DB_HOST/DB_PORT/DB_USER/DB_PASS/DB_NAME (фолбэк)
+    Приоритет:
+      1) settings.DATABASE_URL (универсально: sqlite+aiosqlite / postgresql+asyncpg и т.д.)
+      2) settings.DATABASE_URL_asyncpg (alias для совместимости)
+      3) сборка строки для Postgres (asyncpg) из компонент
     """
-    # 1) новый универсальный URL (sqlite+aiosqlite, postgresql+asyncpg и т.п.)
-    url = getattr(settings, "DATABASE_URL", None)
+    url = (getattr(settings, "DATABASE_URL", None) or "").strip()
     if url:
         return url
-
-    # 2) обратная совместимость со старым именем
-    legacy = getattr(settings, "DATABASE_URL_asyncpg", None)
+    legacy = (getattr(settings, "DATABASE_URL_asyncpg", None) or "").strip()
     if legacy:
         return legacy
-
-    # 3) безопасный дефолт (PostgreSQL + asyncpg)
     host = getattr(settings, "DB_HOST", "database")
     port = getattr(settings, "DB_PORT", 5432)
     user = getattr(settings, "DB_USER", "user")
@@ -47,16 +53,35 @@ def _resolve_database_url() -> str:
     return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{name}"
 
 
-# --- DATABASE URL ---
-DATABASE_URL = _resolve_database_url()
+DATABASE_URL: str = _resolve_database_url()
 
-# --- Engine & sessions ---
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=bool(getattr(settings, "DB_ECHO", False)),
-    pool_pre_ping=True,
-    future=True,
-)
+
+# --- Engine & session factory -----------------------------------------
+def _engine() -> AsyncEngine:
+    # параметры пула можно задать через окружение/настройки при желании
+    pool_size: Optional[int] = getattr(settings, "DB_POOL_SIZE", None)
+    max_overflow: Optional[int] = getattr(settings, "DB_MAX_OVERFLOW", None)
+    pool_recycle: Optional[int] = getattr(settings, "DB_POOL_RECYCLE", None)  # seconds
+    pool_timeout: Optional[int] = getattr(settings, "DB_POOL_TIMEOUT", None)  # seconds
+
+    kwargs = {
+        "echo": bool(getattr(settings, "DB_ECHO", False)),
+        "pool_pre_ping": True,
+        "future": True,
+    }
+    if pool_size is not None:
+        kwargs["pool_size"] = int(pool_size)
+    if max_overflow is not None:
+        kwargs["max_overflow"] = int(max_overflow)
+    if pool_recycle is not None:
+        kwargs["pool_recycle"] = int(pool_recycle)
+    if pool_timeout is not None:
+        kwargs["pool_timeout"] = int(pool_timeout)
+
+    return create_async_engine(DATABASE_URL, **kwargs)
+
+
+engine: AsyncEngine = _engine()
 
 SessionLocal = async_sessionmaker(
     bind=engine,
@@ -65,7 +90,23 @@ SessionLocal = async_sessionmaker(
 )
 
 
-# --- Dependency ---
+# --- FastAPI dependency ------------------------------------------------
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Выдаёт AsyncSession. Транзакции открывайте локально:
+        async with db.begin(): ...
+    """
     async with SessionLocal() as session:
         yield session
+
+
+# --- Optional helpers --------------------------------------------------
+async def db_ping(session: AsyncSession) -> bool:
+    """
+    Быстрый пинг БД для health/ready.
+    """
+    try:
+        await session.execute("SELECT 1")
+        return True
+    except Exception:
+        return False

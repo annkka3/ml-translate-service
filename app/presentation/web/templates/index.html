@@ -1,12 +1,45 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>{{ title }}</title>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-  <h1>Привет, FastAPI</h1>
-  <p>Если видишь это — веб-роутер работает.</p>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}ML Translate — Главная{% endblock %}
+
+{% block content %}
+  <h1>ML Translate</h1>
+  <p class="muted">Онлайн-перевод с английского на французский и обратно с учётом баланса кредитов.</p>
+
+  <section class="grid-2" style="margin-top:16px">
+    <div class="card">
+      <h2>Возможности</h2>
+      <ul>
+        <li>Регистрация и авторизация (JWT)</li>
+        <li>Личный кабинет с балансом в кредитах</li>
+        <li>Пополнение баланса (без эквайринга)</li>
+        <li>Запросы к ML-модели из Web и через REST</li>
+        <li>Списание кредитов только при успешном предсказании</li>
+        <li>История переводов и транзакций</li>
+        <li>Очередь задач (RabbitMQ) и воркеры</li>
+        <li>Валидация входных данных и проверка положительного баланса</li>
+        <li>Роль администратора: пополнение пользователям, просмотр всех транзакций</li>
+      </ul>
+      <p style="margin-top:10px">
+        <a class="btn" href="/web/dashboard">Перейти в кабинет</a>
+        <a class="btn btn-secondary" href="/docs" target="_blank" rel="noopener">API Docs</a>
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Быстрый старт (REST)</h2>
+      <p class="muted">Примеры запросов:</p>
+<pre><code>POST /auth/login
+{
+  "email": "user@example.com",
+  "password": "userpass"
+}
+
+GET /wallet/           (Bearer токен)
+POST /wallet/topup     {"amount": 100}
+POST /translate        {"input_text":"hello","source_lang":"en","target_lang":"fr"}</code></pre>
+      <p class="muted" style="margin-top:8px">
+        Для Telegram-бота укажи <code>API_BASE</code>, <code>API_EMAIL</code>, <code>API_PASSWORD</code> в <code>.env</code>.
+      </p>
+    </div>
+  </section>
+{% endblock %}

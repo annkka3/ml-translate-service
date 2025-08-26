@@ -1,8 +1,7 @@
-
 services:
   database:
     image: postgres:15
-    container_name: postgres
+    container_name: postgres_final
     restart: unless-stopped
     environment:
       POSTGRES_USER: user
@@ -24,7 +23,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.12-management
-    container_name: rabbitmq
+    container_name: rabbitmq_final
     restart: unless-stopped
     ports:
       - "5672:5672"
@@ -48,29 +47,36 @@ services:
     build:
       context: ./app
     image: ml-api:1.0
-    container_name: ml-api
+    container_name: ml-api_final
     restart: unless-stopped
     env_file: "./app/.env"
     environment:
+      # --- API ---
       HF_HOME: /opt/hf-cache
       TRANSFORMERS_CACHE: /opt/hf-cache
-      API_BASE: "http://127.0.0.1:8080"
+      ENABLE_METRICS: "True"
+      CORS_ALLOW_ORIGINS: "*"
+
+      # --- DB (и явная строка asyncpg для совместимости с кодом) ---
       DB_HOST: database
       DB_PORT: "5432"
       DB_USER: user
       DB_PASS: password
       DB_NAME: ml_db
+      DATABASE_URL_asyncpg: "postgresql+asyncpg://user:password@database:5432/ml_db"
 
       DEBUG: "True"
       INIT_DB_ON_START: "False"
       INIT_DB_DROP_ALL: "False"
 
+      # --- RabbitMQ (и явная строка AMQP_URL) ---
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: "5672"
       RABBITMQ_USER: user
       RABBITMQ_PASSWORD: password
       RABBITMQ_VHOST: /
       TASK_QUEUE: ml_tasks
+      AMQP_URL: "amqp://user:password@rabbitmq:5672/"
 
       PYTHONPATH: /workspace
     depends_on:
@@ -93,7 +99,7 @@ services:
       retries: 5
       start_period: 20s
     command: >
-      uvicorn app.main:app --host 0.0.0.0 --port 8080
+      uvicorn app.main:app --host 0.0.0.0 --port 8080 --proxy-headers
     networks:
       - ml-network
 
@@ -104,12 +110,13 @@ services:
     environment:
       PYTHONPATH: /workspace
 
-      # --- DB  ---
+      # --- DB ---
       DB_HOST: database
       DB_PORT: "5432"
       DB_USER: user
       DB_PASS: password
       DB_NAME: ml_db
+      DATABASE_URL_asyncpg: "postgresql+asyncpg://user:password@database:5432/ml_db"
 
       # --- RabbitMQ ---
       RABBITMQ_HOST: rabbitmq
@@ -118,10 +125,14 @@ services:
       RABBITMQ_PASSWORD: password
       RABBITMQ_VHOST: /
       TASK_QUEUE: ml_tasks
+      AMQP_URL: "amqp://user:password@rabbitmq:5672/"
 
       HF_HOME: /opt/hf-cache
       TRANSFORMERS_CACHE: /opt/hf-cache
 
+      # Настройки ретраев воркера
+      WORKER_MAX_RETRIES: "5"
+      WORKER_RETRY_DELAY_SEC: "1.0"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -135,27 +146,29 @@ services:
       - ml-network
     command: >
       python -m app.infrastructure.worker.worker
+    # Масштабируйте воркеры так:
+    #   docker compose up --scale worker=3 -d
 
   telegram-bot:
     build:
       context: ./app/presentation/telegram
-    container_name: telegram-bot
+    container_name: telegram-bot_final
     restart: unless-stopped
     env_file: "./app/presentation/telegram/.env"
+    environment:
+      # Внутрисетевой адрес API (учтите container_name API)
+      API_BASE: "http://app:8080"
     depends_on:
       app:
         condition: service_healthy
     networks:
       - ml-network
-#     volumes:
-#       - ./app/presentation/telegram:/bot
-#     working_dir: /bot
     command: >
       python bot.py
 
   nginx:
     image: nginx:1.25
-    container_name: ml-nginx
+    container_name: ml-nginx_final
     restart: unless-stopped
     depends_on:
       app:
